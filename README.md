@@ -1,0 +1,1 @@
+# idleclans-ReckoningoftheGods-Planner
