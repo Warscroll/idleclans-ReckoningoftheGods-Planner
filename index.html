@@ -4,6 +4,20 @@
   <meta charset="UTF-8">
   <title>Reckoning of the Gods Raid Planner - Idle Clans</title>
 
+  <!-- 
+    Content-Security-Policy (CSP) to restrict resource loading.
+    Adjust as needed for your actual domain/API usage.
+  -->
+  <meta http-equiv="Content-Security-Policy" 
+        content="default-src 'self'; 
+                 script-src 'self' 'unsafe-inline'; 
+                 style-src 'self' 'unsafe-inline'; 
+                 img-src 'self' data: https://warscrolls.net/files/; 
+                 connect-src 'self' https://query.idleclans.com; 
+                 object-src 'none';
+                 frame-ancestors 'none';
+                 base-uri 'self';">
+
   <style>
     /*-------------------------------------------
       1) Root Variables for Light Theme
@@ -33,8 +47,6 @@
 
     /*-------------------------------------------
       2) Dark Theme overrides
-         We'll remember user preference in localStorage
-         and toggle body.classList => "dark-theme"
     -------------------------------------------*/
     .dark-theme {
       --bg-color: #0f0f0f;
@@ -64,16 +76,16 @@
     body {
       margin: 0;
       font-family: Arial, sans-serif;
-      min-height: 100vh; /* ensures body can grow full height */
+      min-height: 100vh;
       background-color: var(--bg-color);
       color: var(--text-color);
       transition: background 0.3s, color 0.3s;
       display: flex;
-      flex-direction: column; /* so the header is on top, then main content */
+      flex-direction: column;
     }
 
     /*-------------------------------------------
-      4) Header Bar (Banner + Title)
+      4) Header Bar
     -------------------------------------------*/
     .header-bar {
       display: flex;
@@ -82,7 +94,7 @@
       color: var(--text-color);
       padding: 10px 20px;
       box-shadow: 0 2px 5px var(--shadow-color);
-      position: relative; /* so we can keep theme toggle inside or separate */
+      position: relative;
     }
     .header-bar img {
       height: 50px;
@@ -115,12 +127,10 @@
 
     /*-------------------------------------------
       6) Main Content Wrapper
-         We'll keep the existing layout:
-         A side .sidebar + a .main-container
     -------------------------------------------*/
     .content-wrapper {
       display: flex;
-      flex: 1; /* fill remaining vertical space */
+      flex: 1; 
     }
 
     /* Sidebar */
@@ -213,6 +223,27 @@
       background: #1f6a91;
     }
 
+    /* Example styling for the clear buttons */
+    .clear-btn {
+      margin-left: 8px;
+      background: #7f8c8d;
+      color: #fff;
+      border: none;
+      padding: 6px 10px;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .clear-btn:hover {
+      background: #686d6e;
+    }
+    .clear-all-inputs-btn {
+      margin-left: 16px;
+      background: #8e44ad;
+    }
+    .clear-all-inputs-btn:hover {
+      background: #7b378d;
+    }
+
     /*-------------------------------------------
       8) Info Boxes
     -------------------------------------------*/
@@ -293,17 +324,16 @@
 
     /*-------------------------------------------
       11) Side-by-side Info Boxes
-          (Raid Summary + Etiquette)
     -------------------------------------------*/
     .info-container {
       display: flex;
       gap: 16px;
-      flex-wrap: wrap; /* ensures they wrap on smaller screens */
+      flex-wrap: wrap;
       margin-bottom: 16px;
     }
     .info-container .info-box {
       flex: 1;
-      margin-bottom: 0; /* override default margin, use container gap */
+      margin-bottom: 0; 
     }
   </style>
 </head>
@@ -317,7 +347,7 @@
 
     <!-- Theme Toggle -->
     <div class="theme-toggle">
-      <input type="checkbox" id="themeSwitch"/>
+      <input type="checkbox" id="themeSwitch" />
       <label for="themeSwitch">Dark Mode</label>
     </div>
   </div>
@@ -328,21 +358,22 @@
     <div class="sidebar">
       <h3>Previously Used</h3>
       <ul id="historyList"></ul>
-      <button onclick="clearAllHistory()">Clear All Saved</button>
+      <button id="clearHistoryBtn">Clear All Saved</button>
     </div>
 
     <!-- Main Container -->
     <div class="main-container">
       <!-- Player inputs -->
       <div class="player-inputs" id="inputsBox">
-        <div>
+        <div style="margin-bottom:8px;">
           <label>Your Username:</label>
-          <input type="text" id="yourUsername">
+          <input type="text" id="yourUsername" maxlength="20">
+          <button class="clear-btn" id="clearUsernameBtn">Clear</button>
+          <button class="clear-btn clear-all-inputs-btn" id="clearAllInputsBtn">Clear All Current Inputs</button>
         </div>
-        <br/>
         <div>
           <label>How many other players?</label>
-          <select id="otherCountSelect" onchange="generateOtherFields()">
+          <select id="otherCountSelect">
             <option value="0">0</option>
             <option value="1">1</option>
             <option value="2" selected>2</option>
@@ -352,7 +383,10 @@
           </select>
         </div>
         <div id="othersContainer" style="margin-top:10px;"></div>
-        <button id="fetchBtn" style="display:none;" onclick="fetchAll()">Fetch &amp; Calculate</button>
+        <button id="fetchBtn" style="display:none;">Fetch &amp; Calculate</button>
+
+        <!-- Share Link Button -->
+        <button id="shareBtn" style="display:none; margin-left:10px;">Share Link</button>
       </div>
 
       <!-- Results -->
@@ -361,331 +395,352 @@
   </div>
 
   <script>
-  /************************************************************
-   * 1) localStorage for user history
-   ************************************************************/
-  let userHistory = []; // store unique usernames
+    /************************************************************
+     * Security/Validation Helpers
+     ************************************************************/
+    function sanitizeUsername(name) {
+      // Remove anything that's not letters, digits, underscore, or space
+      // Also trim and limit to 20 characters
+      return name.replace(/[^\w\s]/gi, '').trim().slice(0, 20);
+    }
 
-  function loadHistory() {
-    // 1) Load username history
-    const saved = localStorage.getItem("usernameHistory");
-    if (saved) {
-      try {
-        userHistory = JSON.parse(saved);
-        if (!Array.isArray(userHistory)) userHistory = [];
-      } catch(e) {
-        userHistory = [];
+    /************************************************************
+     * 1) localStorage for user history
+     ************************************************************/
+    let userHistory = [];
+
+    function loadHistory() {
+      const saved = localStorage.getItem("usernameHistory");
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed)) {
+            userHistory = parsed;
+          }
+        } catch(e) {
+          userHistory = [];
+        }
       }
-    }
-    // 2) Load 'myUserName'
-    const myU = localStorage.getItem("myUserName");
-    if (myU) {
-      document.getElementById("yourUsername").value = myU;
-    }
-    updateHistoryList();
-  }
-
-  function saveHistory() {
-    localStorage.setItem("usernameHistory", JSON.stringify(userHistory));
-  }
-
-  function updateHistoryList() {
-    const ul = document.getElementById("historyList");
-    ul.innerHTML = "";
-    userHistory.forEach(name => {
-      const li = document.createElement("li");
-      li.textContent = name;
-      li.addEventListener("click", () => onHistoryNameClick(name));
-      ul.appendChild(li);
-    });
-  }
-
-  function addToHistory(name) {
-    name = name.trim();
-    if (name && !userHistory.includes(name)) {
-      userHistory.push(name);
-      saveHistory();
+      const myU = localStorage.getItem("myUserName");
+      if (myU) {
+        document.getElementById("yourUsername").value = sanitizeUsername(myU);
+      }
       updateHistoryList();
     }
-  }
 
-  function clearAllHistory() {
-    localStorage.removeItem("usernameHistory");
-    localStorage.removeItem("myUserName");
-    userHistory = [];
-    document.getElementById("yourUsername").value = "";
-    updateHistoryList();
-  }
+    function saveHistory() {
+      localStorage.setItem("usernameHistory", JSON.stringify(userHistory));
+    }
 
-  /************************************************************
-   * 2) On clicking a previously used name in the sidebar
-   ************************************************************/
-  function onHistoryNameClick(name) {
-    // We want to fill the next empty "other" player slot if:
-    //  - It's not already "Your Username"
-    //  - It's not already in any other slot
-    const you = document.getElementById("yourUsername").value.trim();
-    if (you.toLowerCase() === name.toLowerCase()) return; // already me
+    function updateHistoryList() {
+      const ul = document.getElementById("historyList");
+      ul.innerHTML = "";
+      userHistory.forEach(name => {
+        const li = document.createElement("li");
+        li.textContent = name;
+        li.addEventListener("click", () => onHistoryNameClick(name));
+        ul.appendChild(li);
+      });
+    }
 
-    const cnt = parseInt(document.getElementById("otherCountSelect").value) || 0;
-    for (let i = 0; i < cnt; i++){
-      const f = document.getElementById("other" + i);
-      if (f && f.value.trim().toLowerCase() === name.toLowerCase()) {
-        // already in that slot, skip
-        return;
+    function addToHistory(name) {
+      name = sanitizeUsername(name);
+      if (name && !userHistory.includes(name)) {
+        userHistory.push(name);
+        saveHistory();
+        updateHistoryList();
       }
     }
-    // find the first empty slot
-    for (let i = 0; i < cnt; i++){
-      const f = document.getElementById("other" + i);
-      if (f && !f.value.trim()) {
-        f.value = name;
-        break;
+
+    function clearAllHistory() {
+      localStorage.removeItem("usernameHistory");
+      localStorage.removeItem("myUserName");
+      userHistory = [];
+      document.getElementById("yourUsername").value = "";
+      updateHistoryList();
+    }
+
+    /************************************************************
+     * 2) On clicking a previously used name
+     ************************************************************/
+    function onHistoryNameClick(name) {
+      const sanitized = sanitizeUsername(name);
+      const you = sanitizeUsername(document.getElementById("yourUsername").value);
+      if (you.toLowerCase() === sanitized.toLowerCase()) return;
+
+      const cnt = parseInt(document.getElementById("otherCountSelect").value) || 0;
+      for (let i = 0; i < cnt; i++){
+        const f = document.getElementById("other" + i);
+        if (f && sanitizeUsername(f.value).toLowerCase() === sanitized.toLowerCase()) {
+          return; // already in a slot
+        }
+      }
+      // find first empty
+      for (let i = 0; i < cnt; i++){
+        const f = document.getElementById("other" + i);
+        if (f && !sanitizeUsername(f.value)) {
+          f.value = sanitized;
+          break;
+        }
       }
     }
-  }
 
-  /************************************************************
-   * 3) XP => Level data
-   ************************************************************/
-  const levelXPData = {
-    1:0,2:75,3:151,4:227,5:303,6:380,7:531,8:683,9:836,
-    10:988,11:1141,12:1294,13:1447,14:1751,15:2054,16:2358,
-    17:2663,18:2967,19:3272,20:3577,21:4182,22:4788,23:5393,
-    24:5999,25:6606,26:7212,27:7819,28:9026,29:10233,30:11441,
-    31:12648,32:13856,33:15065,34:16273,35:18682,36:21091,
-    37:23500,38:25910,39:28319,40:30729,41:33140,42:37950,
-    43:42761,44:47572,45:52383,46:57195,47:62006,48:66818,
-    49:76431,50:86043,51:95656,52:105269,53:114882,54:124496,
-    55:134109,56:153323,57:172538,58:191752,59:210967,60:230182,
-    61:249397,62:268613,63:307028,64:345444,65:383861,66:422277,
-    67:460694,68:499111,69:537528,70:614346,71:691163,72:767981,
-    73:844800,74:921618,75:998437,76:1075256,77:1228875,78:1382495,
-    79:1536114,80:1689734,81:1843355,82:1996975,83:2150596,84:2457817,
-    85:2765038,86:3072260,87:3379481,88:3686703,89:3993926,90:4301148,
-    91:4915571,92:5529994,93:6144417,94:6758841,95:7373264,
-    96:7987688,97:8602113,98:9830937,99:11059762,100:12288587,
-    101:13517412,102:14746238,103:15975063,104:17203889,105:19661516,
-    106:22119142,107:24576769,108:27034396,109:29492023,110:31949651,
-    111:34407278,112:39322506,113:44237735,114:49152963,115:54068192,
-    116:58983421,117:63898650,118:68813880,119:78644309,120:88474739
-  };
+    /************************************************************
+     * 3) XP => Level data
+     ************************************************************/
+    const levelXPData = {
+      1:0,2:75,3:151,4:227,5:303,6:380,7:531,8:683,9:836,
+      10:988,11:1141,12:1294,13:1447,14:1751,15:2054,16:2358,
+      17:2663,18:2967,19:3272,20:3577,21:4182,22:4788,23:5393,
+      24:5999,25:6606,26:7212,27:7819,28:9026,29:10233,30:11441,
+      31:12648,32:13856,33:15065,34:16273,35:18682,36:21091,
+      37:23500,38:25910,39:28319,40:30729,41:33140,42:37950,
+      43:42761,44:47572,45:52383,46:57195,47:62006,48:66818,
+      49:76431,50:86043,51:95656,52:105269,53:114882,54:124496,
+      55:134109,56:153323,57:172538,58:191752,59:210967,60:230182,
+      61:249397,62:268613,63:307028,64:345444,65:383861,66:422277,
+      67:460694,68:499111,69:537528,70:614346,71:691163,72:767981,
+      73:844800,74:921618,75:998437,76:1075256,77:1228875,78:1382495,
+      79:1536114,80:1689734,81:1843355,82:1996975,83:2150596,84:2457817,
+      85:2765038,86:3072260,87:3379481,88:3686703,89:3993926,90:4301148,
+      91:4915571,92:5529994,93:6144417,94:6758841,95:7373264,
+      96:7987688,97:8602113,98:9830937,99:11059762,100:12288587,
+      101:13517412,102:14746238,103:15975063,104:17203889,105:19661516,
+      106:22119142,107:24576769,108:27034396,109:29492023,110:31949651,
+      111:34407278,112:39322506,113:44237735,114:49152963,115:54068192,
+      116:58983421,117:63898650,118:68813880,119:78644309,120:88474739
+    };
 
-  function getLevelFromXP(xp) {
-    let level = 1;
-    for (const lvl in levelXPData) {
-      if (xp >= levelXPData[lvl]) level = parseInt(lvl);
-      else break;
-    }
-    return level;
-  }
-
-  /************************************************************
-   * 4) Gemstones & Gear
-   ************************************************************/
-  const BASE_URL = "https://warscrolls.net/files/"; // or your actual URL
-  const gemstoneData = [
-    { name: "Refined Gemstone",     file: "refined_gemstone.png",    reqSkill: "Crafting", reqLevel: 10 },
-    { name: "Great Gemstone",       file: "great_gemstone.png",      reqSkill: "Crafting", reqLevel: 25 },
-    { name: "Elite Gemstone",       file: "elite_gemstone.png",      reqSkill: "Crafting", reqLevel: 40 },
-    { name: "Superior Gemstone",    file: "superior_gemstone.png",   reqSkill: "Crafting", reqLevel: 50 },
-    { name: "Outstanding Gemstone", file: "outstanding_gemstone.png",reqSkill: "Crafting", reqLevel: 70 },
-    { name: "Godlike Gemstone",     file: "godlike_gemstone.png",    reqSkill: "Crafting", reqLevel: 85 }
-  ];
-
-  // cursed => Magic>=80, black => Arch>=40
-  const gearData = [
-    { name: "Cursed Robe",              file: "cursed_robe.png",            reqSkill: "Magic",   reqLevel: 80 },
-    { name: "Cursed Trousers",          file: "cursed_trousers.png",        reqSkill: "Magic",   reqLevel: 80 },
-    { name: "Black Leather Coat",       file: "black_leather_coat.png",     reqSkill: "Archery", reqLevel: 40 },
-    { name: "Black Leather Trousers",   file: "black_leather_trousers.png", reqSkill: "Archery", reqLevel: 40 }
-  ];
-
-  /************************************************************
-   * 5) Generate fields for "other" players
-   ************************************************************/
-  function generateOtherFields() {
-    const cnt = parseInt(document.getElementById("otherCountSelect").value) || 0;
-    const box = document.getElementById("othersContainer");
-    box.innerHTML = "";
-
-    for (let i = 0; i < cnt; i++) {
-      const d = document.createElement("div");
-      d.innerHTML = `
-        <label>Player ${i+2} Username:</label>
-        <input type="text" id="other${i}" style="margin-bottom:8px;" />
-        <br/>
-      `;
-      box.appendChild(d);
-    }
-    if (cnt > 0) box.innerHTML += "<br/>";
-    document.getElementById("fetchBtn").style.display = (cnt >= 0) ? "inline-block" : "none";
-  }
-
-  /************************************************************
-   * 6) Fetch data from IdleClans for each user
-   ************************************************************/
-  async function fetchAll() {
-    const yourU = document.getElementById("yourUsername").value.trim();
-    if (!yourU) {
-      alert("Please enter your username.");
-      return;
+    function getLevelFromXP(xp) {
+      let level = 1;
+      for (const lvl in levelXPData) {
+        if (xp >= levelXPData[lvl]) {
+          level = parseInt(lvl);
+        } else {
+          break;
+        }
+      }
+      return level;
     }
 
-    localStorage.setItem("myUserName", yourU);
+    /************************************************************
+     * 4) Gemstones & Gear
+     ************************************************************/
+    const BASE_URL = "https://warscrolls.net/files/";
 
-    const cnt = parseInt(document.getElementById("otherCountSelect").value) || 0;
-    const total = 1 + cnt;
-    if (total > 6) {
-      alert("Max 6 players.");
-      return;
-    }
+    // Removed Refined & Great Gemstones, as not obtainable from ROG
+    const gemstoneData = [
+      { name: "Elite Gemstone",       file: "elite_gemstone.png",      reqSkill: "Crafting", reqLevel: 40 },
+      { name: "Superior Gemstone",    file: "superior_gemstone.png",   reqSkill: "Crafting", reqLevel: 50 },
+      { name: "Outstanding Gemstone", file: "outstanding_gemstone.png",reqSkill: "Crafting", reqLevel: 70 },
+      { name: "Godlike Gemstone",     file: "godlike_gemstone.png",    reqSkill: "Crafting", reqLevel: 85 }
+    ];
 
-    const players = [];
-    try {
-      const youData = await fetchOne(yourU);
-      players.push({ username: yourU, skillLevels: youData });
-      addToHistory(yourU);
+    // Adjusted Cursed => Magic lvl 50; Black Leather => Archery lvl 75
+    const gearData = [
+      { name: "Cursed Robe",              file: "cursed_robe.png",            reqSkill: "Magic",   reqLevel: 50 },
+      { name: "Cursed Trousers",          file: "cursed_trousers.png",        reqSkill: "Magic",   reqLevel: 50 },
+      { name: "Black Leather Coat",       file: "black_leather_coat.png",     reqSkill: "Archery", reqLevel: 75 },
+      { name: "Black Leather Trousers",   file: "black_leather_trousers.png", reqSkill: "Archery", reqLevel: 75 }
+    ];
+
+    /************************************************************
+     * 5) Generate fields for "other" players
+     ************************************************************/
+    function generateOtherFields() {
+      const cnt = parseInt(document.getElementById("otherCountSelect").value) || 0;
+      const box = document.getElementById("othersContainer");
+      box.innerHTML = "";
 
       for (let i = 0; i < cnt; i++) {
-        const nm = document.getElementById("other" + i).value.trim();
-        if (!nm) {
-          alert("Missing username for player " + (i + 2));
-          return;
+        const d = document.createElement("div");
+        const label = document.createElement("label");
+        label.textContent = `Player ${i+2} Username: `;
+        const input = document.createElement("input");
+        input.type = "text";
+        input.id = "other" + i;
+        input.maxLength = 20;
+        input.style.marginBottom = "8px";
+        d.appendChild(label);
+        d.appendChild(input);
+        box.appendChild(d);
+      }
+      if (cnt > 0) {
+        const br = document.createElement("br");
+        box.appendChild(br);
+      }
+      // Show fetch & share buttons if at least 0 players exist
+      const fetchBtn = document.getElementById("fetchBtn");
+      const shareBtn = document.getElementById("shareBtn");
+      fetchBtn.style.display = (cnt >= 0) ? "inline-block" : "none";
+      shareBtn.style.display = (cnt >= 0) ? "inline-block" : "none";
+    }
+
+    /************************************************************
+     * 6) Fetch data from IdleClans
+     ************************************************************/
+    async function fetchAll() {
+      const rawYourU = document.getElementById("yourUsername").value;
+      const yourU = sanitizeUsername(rawYourU);
+      if (!yourU) {
+        alert("Please enter your username (letters/numbers).");
+        return;
+      }
+
+      localStorage.setItem("myUserName", yourU);
+
+      const cnt = parseInt(document.getElementById("otherCountSelect").value) || 0;
+      const total = 1 + cnt;
+      if (total > 6) {
+        alert("Max 6 players.");
+        return;
+      }
+
+      const players = [];
+      try {
+        const youData = await fetchOne(yourU);
+        players.push({ username: yourU, skillLevels: youData });
+        addToHistory(yourU);
+
+        for (let i = 0; i < cnt; i++) {
+          const nm = document.getElementById("other" + i).value;
+          const sanitizedNm = sanitizeUsername(nm);
+          if (!sanitizedNm) {
+            alert(`Missing username for player ${i + 2}`);
+            return;
+          }
+          const dataObj = await fetchOne(sanitizedNm);
+          players.push({ username: sanitizedNm, skillLevels: dataObj });
+          addToHistory(sanitizedNm);
         }
-        const dataObj = await fetchOne(nm);
-        players.push({ username: nm, skillLevels: dataObj });
-        addToHistory(nm);
-      }
-      assignRolesAndDisplay(players, yourU);
+        assignRolesAndDisplay(players, yourU);
 
-    } catch (err) {
-      alert("Error fetching data: " + err.message);
-      console.error(err);
-    }
-  }
-
-  async function fetchOne(name) {
-    const url = `https://query.idleclans.com/api/Player/profile/simple/${encodeURIComponent(name)}`;
-    const resp = await fetch(url);
-    if (!resp.ok) {
-      if (resp.status === 404) {
-        throw new Error(`User "${name}" not found (404).`);
-      } else {
-        throw new Error(`HTTP Error: ${resp.status}`);
-      }
-    }
-    const js = await resp.json();
-    const xp = JSON.parse(js.skillExperiences || "{}");
-    return {
-      Attack: getLevelFromXP(xp["Rigour"] || 0),
-      Strength: getLevelFromXP(xp["Strength"] || 0),
-      Defence: getLevelFromXP(xp["Defence"] || 0),
-      Magic: getLevelFromXP(xp["Magic"] || 0),
-      Archery: getLevelFromXP(xp["Archery"] || 0),
-      Health: getLevelFromXP(xp["Health"] || 0),
-      Fishing: getLevelFromXP(xp["Fishing"] || 0),
-      Cooking: getLevelFromXP(xp["Cooking"] || 0),
-      Plundering: getLevelFromXP(xp["Plundering"] || 0),
-      Crafting: getLevelFromXP(xp["Crafting"] || 0)
-    };
-  }
-
-  /************************************************************
-   * 7) Assign roles + display
-   ************************************************************/
-  function assignRolesAndDisplay(players, yourName) {
-    const count = players.length;
-
-    // (A) Support roles
-    let wPlund = 1, wFish = 1, wCook = 0;
-    if (count === 3) { wPlund = 1; wFish = 1; wCook = 1; }
-    else if (count === 4) { wPlund = 2; wFish = 1; wCook = 1; }
-    else if (count === 5) { wPlund = 2; wFish = 2; wCook = 1; }
-    else if (count === 6) { wPlund = 3; wFish = 2; wCook = 1; }
-
-    let unassigned = [...players];
-    unassigned.forEach(p => p.supportRole = "");
-
-    // Plundering
-    unassigned.sort((a, b) => b.skillLevels.Plundering - a.skillLevels.Plundering);
-    const plArr = unassigned.slice(0, wPlund);
-    plArr.forEach(u => u.supportRole = "Plundering");
-    unassigned = unassigned.slice(wPlund);
-
-    // For 2 players => leftover => fish+Cook
-    if (count === 2) {
-      if (unassigned[0]) unassigned[0].supportRole = "Fish+Cook";
-    } else {
-      // Next: Fishing
-      unassigned.sort((a, b) => b.skillLevels.Fishing - a.skillLevels.Fishing);
-      const fi = unassigned.slice(0, wFish);
-      fi.forEach(x => x.supportRole = "Fishing");
-      unassigned = unassigned.slice(wFish);
-
-      // Next: Cooking
-      unassigned.sort((a, b) => b.skillLevels.Cooking - a.skillLevels.Cooking);
-      const co = unassigned.slice(0, wCook);
-      co.forEach(x => x.supportRole = "Cooking");
-      unassigned = unassigned.slice(wCook);
-    }
-
-    // (B) Combat
-    let roleSlots = (count <= 2) ? 1 : ((count <= 4) ? 2 : 3);
-    let remainArch = roleSlots, remainMelee = roleSlots, remainMagic = roleSlots;
-    players.forEach(p => p.combatRole = "");
-
-    // ARCHERY FIRST - but only if Archery >= 90
-    players.sort((a, b) => b.skillLevels.Archery - a.skillLevels.Archery);
-    for (let i = 0; i < players.length && remainArch > 0; i++) {
-      if (!players[i].combatRole && players[i].skillLevels.Archery >= 90) {
-        players[i].combatRole = "Archery";
-        remainArch--;
+      } catch (err) {
+        alert("Error fetching data: " + err.message);
+        console.error(err);
       }
     }
 
-    // OTHERS => MELEE or MAGIC
-    const bigGap = 20;
-    players.forEach(p => {
-      if (!p.combatRole) {
-        const s = p.skillLevels;
-        const meleeScore = s.Attack + s.Strength + s.Defence;
-        const magicScore = s.Magic;
-        // big gap logic
-        if ((magicScore - meleeScore) >= bigGap && remainMagic > 0) {
-          p.combatRole = "Magic";
-          remainMagic--;
-        } else if (remainMelee > 0) {
-          p.combatRole = "Melee";
-          remainMelee--;
-        } else if (remainMagic > 0) {
-          p.combatRole = "Magic";
-          remainMagic--;
+    async function fetchOne(name) {
+      const url = `https://query.idleclans.com/api/Player/profile/simple/${encodeURIComponent(name)}`;
+      const resp = await fetch(url);
+      if (!resp.ok) {
+        if (resp.status === 404) {
+          throw new Error(`User "${name}" not found (404).`);
         } else {
-          p.combatRole = "Melee";
+          throw new Error(`HTTP Error: ${resp.status}`);
         }
       }
-    });
+      const js = await resp.json();
+      const xp = JSON.parse(js.skillExperiences || "{}");
+      return {
+        Attack: getLevelFromXP(xp["Rigour"] || 0),
+        Strength: getLevelFromXP(xp["Strength"] || 0),
+        Defence: getLevelFromXP(xp["Defence"] || 0),
+        Magic: getLevelFromXP(xp["Magic"] || 0),
+        Archery: getLevelFromXP(xp["Archery"] || 0),
+        Health: getLevelFromXP(xp["Health"] || 0),
+        Fishing: getLevelFromXP(xp["Fishing"] || 0),
+        Cooking: getLevelFromXP(xp["Cooking"] || 0),
+        Plundering: getLevelFromXP(xp["Plundering"] || 0),
+        Crafting: getLevelFromXP(xp["Crafting"] || 0)
+      };
+    }
 
-    displayResults(players, yourName);
-  }
+    /************************************************************
+     * 7) Assign roles + display
+     ************************************************************/
+    function assignRolesAndDisplay(players, yourName) {
+      const count = players.length;
 
-  /************************************************************
-   * 8) Display
-   ************************************************************/
-  function displayResults(players, yourName) {
-    const container = document.getElementById("resultsContainer");
-    container.innerHTML = "";
+      // Support roles
+      let wPlund = 1, wFish = 1, wCook = 0;
+      if (count === 3) { wPlund = 1; wFish = 1; wCook = 1; }
+      else if (count === 4) { wPlund = 2; wFish = 1; wCook = 1; }
+      else if (count === 5) { wPlund = 2; wFish = 2; wCook = 1; }
+      else if (count === 6) { wPlund = 3; wFish = 2; wCook = 1; }
 
-    const count = players.length;
-    let itemCount = (count <= 2) ? 1 : ((count <= 4) ? 2 : 3);
-    let bosses = (count <= 2) ? 1 : ((count <= 4) ? 2 : 3);
-    let monsters = 2 * count;
+      let unassigned = [...players];
+      unassigned.forEach(p => p.supportRole = "");
 
-    // main table (players)
-    const table = document.createElement("table");
-    table.innerHTML = `
-      <thead>
+      // Plundering
+      unassigned.sort((a, b) => b.skillLevels.Plundering - a.skillLevels.Plundering);
+      const plArr = unassigned.slice(0, wPlund);
+      plArr.forEach(u => u.supportRole = "Plundering");
+      unassigned = unassigned.slice(wPlund);
+
+      // For 2 players => leftover => fish+Cook
+      if (count === 2) {
+        if (unassigned[0]) unassigned[0].supportRole = "Fish+Cook";
+      } else {
+        // Next: Fishing
+        unassigned.sort((a, b) => b.skillLevels.Fishing - a.skillLevels.Fishing);
+        const fi = unassigned.slice(0, wFish);
+        fi.forEach(x => x.supportRole = "Fishing");
+        unassigned = unassigned.slice(wFish);
+
+        // Next: Cooking
+        unassigned.sort((a, b) => b.skillLevels.Cooking - a.skillLevels.Cooking);
+        const co = unassigned.slice(0, wCook);
+        co.forEach(x => x.supportRole = "Cooking");
+        unassigned = unassigned.slice(wCook);
+      }
+
+      // Combat roles
+      let roleSlots = (count <= 2) ? 1 : ((count <= 4) ? 2 : 3);
+      let remainArch = roleSlots, remainMelee = roleSlots, remainMagic = roleSlots;
+      players.forEach(p => p.combatRole = "");
+
+      // Assign Archery first if >= 90
+      players.sort((a, b) => b.skillLevels.Archery - a.skillLevels.Archery);
+      for (let i = 0; i < players.length && remainArch > 0; i++) {
+        if (!players[i].combatRole && players[i].skillLevels.Archery >= 90) {
+          players[i].combatRole = "Archery";
+          remainArch--;
+        }
+      }
+
+      // Then Melee or Magic
+      const bigGap = 20;
+      players.forEach(p => {
+        if (!p.combatRole) {
+          const s = p.skillLevels;
+          const meleeScore = s.Attack + s.Strength + s.Defence;
+          const magicScore = s.Magic;
+          if ((magicScore - meleeScore) >= bigGap && remainMagic > 0) {
+            p.combatRole = "Magic";
+            remainMagic--;
+          } else if (remainMelee > 0) {
+            p.combatRole = "Melee";
+            remainMelee--;
+          } else if (remainMagic > 0) {
+            p.combatRole = "Magic";
+            remainMagic--;
+          } else {
+            p.combatRole = "Melee";
+          }
+        }
+      });
+
+      displayResults(players, yourName);
+    }
+
+    /************************************************************
+     * 8) Display
+     ************************************************************/
+    function displayResults(players, yourName) {
+      const container = document.getElementById("resultsContainer");
+      container.innerHTML = "";
+
+      const count = players.length;
+      let itemCount = (count <= 2) ? 1 : ((count <= 4) ? 2 : 3);
+      let bosses = (count <= 2) ? 1 : ((count <= 4) ? 2 : 3);
+      let monsters = 2 * count;
+
+      // Main table
+      const table = document.createElement("table");
+      const thead = document.createElement("thead");
+      thead.innerHTML = `
         <tr>
           <th>Username</th>
           <th>Combat Role</th>
@@ -693,188 +748,319 @@
           <th>Levels</th>
           <th>Equipment Access</th>
         </tr>
-      </thead>
-    `;
-    const tbody = document.createElement("tbody");
+      `;
+      table.appendChild(thead);
 
-    const skillOrder = ["Attack","Strength","Defence","Magic","Archery","Fishing","Cooking","Plundering"];
-    const skillIcons = {
-      Attack: "Rigour.png",
-      Strength: "Strength.png",
-      Defence: "Defence.png",
-      Magic: "Magic.png",
-      Archery: "Archery.png",
-      Fishing: "Fishing.png",
-      Cooking: "Cooking.png",
-      Plundering: "Plundering.png"
-    };
+      const tbody = document.createElement("tbody");
 
-    players.forEach(p => {
-      const s = p.skillLevels;
-      const isYou = (p.username.toLowerCase() === yourName.toLowerCase());
+      const skillOrder = ["Attack","Strength","Defence","Magic","Archery","Fishing","Cooking","Plundering"];
+      const skillIcons = {
+        Attack: "Rigour.png",
+        Strength: "Strength.png",
+        Defence: "Defence.png",
+        Magic: "Magic.png",
+        Archery: "Archery.png",
+        Fishing: "Fishing.png",
+        Cooking: "Cooking.png",
+        Plundering: "Plundering.png"
+      };
 
-      // level string
-      const levelStr = skillOrder.map(sk => {
-        return `<img class="icon" src="${BASE_URL}${skillIcons[sk]}" alt="${sk}"/>${s[sk]}`;
-      }).join(" / ");
+      players.forEach(p => {
+        const s = p.skillLevels;
+        const isYou = (p.username.toLowerCase() === yourName.toLowerCase());
 
-      // weapon icon
-      let wepFile = "";
-      if (p.combatRole === "Archery") {
-        wepFile = "godlike_bow.png";
-      } else if (p.combatRole === "Magic") {
-        wepFile = "godlike_staff.png";
-      } else {
-        // default => Melee
-        if (s.Attack < 90) wepFile = "godlike_staff.png";
-        else wepFile = "godlike_heavy_hammer.png";
+        // Build levels string
+        const levelStr = skillOrder.map(sk => {
+          return `<img class="icon" src="${BASE_URL}${skillIcons[sk]}" alt="${sk}"/>${s[sk]}`;
+        }).join(" / ");
+
+        // Weapon icon logic
+        let wepFile = "";
+        if (p.combatRole === "Archery") {
+          wepFile = "godlike_bow.png";
+        } else if (p.combatRole === "Magic") {
+          wepFile = "godlike_staff.png";
+        } else {
+          // Melee
+          if (s.Attack < 90) wepFile = "godlike_staff.png";
+          else wepFile = "godlike_heavy_hammer.png";
+        }
+        const wepIcon = `<img class="icon" src="${BASE_URL}${wepFile}" alt="Weapon" />`;
+
+        // Gem + gear icons
+        const itemHTML = [];
+        gemstoneData.forEach(g => {
+          const meetsReq = s[g.reqSkill] >= g.reqLevel;
+          itemHTML.push(`
+            <img class="icon ${!meetsReq ? 'locked' : ''}"
+                 src="${BASE_URL}${g.file}"
+                 alt="${g.name}"
+                 title="${g.name} (Req ${g.reqSkill} ${g.reqLevel})">
+          `);
+        });
+        gearData.forEach(g => {
+          const meetsReq = s[g.reqSkill] >= g.reqLevel;
+          itemHTML.push(`
+            <img class="icon ${!meetsReq ? 'locked' : ''}"
+                 src="${BASE_URL}${g.file}"
+                 alt="${g.name}"
+                 title="${g.name} (Req ${g.reqSkill} ${g.reqLevel})">
+          `);
+        });
+
+        const tr = document.createElement("tr");
+        if (isYou) tr.classList.add("highlight");
+        tr.innerHTML = `
+          <td>${p.username}</td>
+          <td class="role">${p.combatRole}</td>
+          <td>${p.supportRole || "None"}</td>
+          <td>${levelStr}</td>
+          <td class="item-list">${wepIcon}${itemHTML.join("")}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+
+      table.appendChild(tbody);
+      container.appendChild(table);
+
+      // info boxes container
+      const infoContainer = document.createElement("div");
+      infoContainer.className = "info-container";
+
+      // summary box
+      const summary = document.createElement("div");
+      summary.className = "info-box";
+      summary.innerHTML = `
+        <h3>Raid Summary</h3>
+        <p>Group Size: ${count}</p>
+        <p>Item Drops Each: ${itemCount}</p>
+        <p>Bosses: ${bosses}, Monsters: ${monsters}</p>
+        <p>Max Weapons (Bow/Hammer/Staff): ${itemCount}</p>
+      `;
+      infoContainer.appendChild(summary);
+
+      // etiquette box
+      const note = document.createElement("div");
+      note.className = "info-box";
+      note.innerHTML = `
+        <h3>General Etiquette & Tips</h3>
+        <ul>
+          <li>Heavy Hammer (Melee) has priority on Outstanding/Godlike Gems.</li>
+          <li>Archers have lower priority for top-tier gems if hammer users or magic are available.</li>
+          <li>Try to skip gem tiers if it helps the team overall.</li>
+          <li>2 players => 1 plundering, 1 fish+cook. More players => advanced distribution.</li>
+          <li><strong>Cursed gear requires Magic ≥50; black leather requires Archery ≥75.</strong></li>
+          <li>Click a previously used name to fill the next empty slot (avoiding duplicates).</li>
+        </ul>
+      `;
+      infoContainer.appendChild(note);
+
+      container.appendChild(infoContainer);
+
+      // Gem Priority section
+      const gemBox = document.createElement("div");
+      gemBox.className = "info-box";
+      gemBox.innerHTML = `<h3>Gemstone Priority</h3>`;
+      container.appendChild(gemBox);
+
+      // Build gem priority table with custom logic
+      const gemTable = document.createElement("table");
+      gemTable.className = "gem-priority-table";
+
+      let headerRow = `<tr><th>Gem</th>`;
+      // We’ll display each player in a single row for each gem
+      // so columns = # of players
+      const maxSlots = players.length;
+      for (let i = 1; i <= maxSlots; i++) {
+        let suffix = "th";
+        if (i === 1) suffix = "st";
+        else if (i === 2) suffix = "nd";
+        else if (i === 3) suffix = "rd";
+        headerRow += `<th>${i}${suffix}</th>`;
       }
-      const wepIcon = `<img class="icon" src="${BASE_URL}${wepFile}" alt="Weapon" />`;
+      headerRow += `</tr>`;
+      gemTable.innerHTML = `<thead>${headerRow}</thead>`;
 
-      // gem + gear icons
-      const itemHTML = [];
-      gemstoneData.forEach(g => {
-        const meetsReq = s[g.reqSkill] >= g.reqLevel;
-        itemHTML.push(`
-          <img class="icon ${!meetsReq ? 'locked' : ''}"
-               src="${BASE_URL}${g.file}"
-               alt="${g.name}"
-               title="${g.name} (Req ${g.reqSkill} ${g.reqLevel})">
-        `);
+      const gemBody = document.createElement("tbody");
+
+      // Sort logic for each gem:
+      //  1) If it's "Outstanding" or "Godlike" => 
+      //     - Melee (Attack >= 90) first, sorted by Attack descending
+      //     - Then Magic, sorted by Magic descending
+      //     - Then Archery, sorted by Archery descending
+      //     - Then any others
+      //  2) Otherwise => sort by Crafting descending
+      function getGemPriorityOrder(gemName, playerList) {
+        const isTopGem = gemName.includes("Outstanding") || gemName.includes("Godlike");
+        if (isTopGem) {
+          // Partition based on roles
+          const melee = [];
+          const magic = [];
+          const archers = [];
+          const others = [];
+
+          playerList.forEach(p => {
+            const s = p.skillLevels;
+            // "Melee" role w/ Attack ≥ 90 => heavy hammer user
+            if (p.combatRole === "Melee" && s.Attack >= 90) {
+              melee.push(p);
+            }
+            else if (p.combatRole === "Magic") {
+              magic.push(p);
+            }
+            else if (p.combatRole === "Archery") {
+              archers.push(p);
+            }
+            else {
+              others.push(p);
+            }
+          });
+          // Sort each group descending by relevant skill
+          melee.sort((a,b) => b.skillLevels.Attack - a.skillLevels.Attack);
+          magic.sort((a,b) => b.skillLevels.Magic - a.skillLevels.Magic);
+          archers.sort((a,b) => b.skillLevels.Archery - a.skillLevels.Archery);
+
+          return [...melee, ...magic, ...archers, ...others];
+        } 
+        else {
+          // Default => sort by Crafting desc
+          return [...playerList].sort((a,b) => b.skillLevels.Crafting - a.skillLevels.Crafting);
+        }
+      }
+
+      gemstoneData.forEach(gem => {
+        const row = document.createElement("tr");
+        row.innerHTML = `
+          <td>
+            <img class="icon" src="${BASE_URL}${gem.file}" alt="${gem.name}"/>
+            ${gem.name}
+          </td>
+        `;
+
+        // Sort players for this gem
+        const sortedPlayers = getGemPriorityOrder(gem.name, players);
+
+        sortedPlayers.forEach(pl => {
+          const user = pl.username;
+          const isYou = (user.toLowerCase() === yourName.toLowerCase());
+          const meetsReq = pl.skillLevels[gem.reqSkill] >= gem.reqLevel;
+          const displayUser = meetsReq ? user : "(locked)";
+          const styleCell = isYou ? `style="background: var(--highlight-bg);"` : "";
+          row.innerHTML += `<td ${styleCell}>${displayUser}</td>`;
+        });
+        gemBody.appendChild(row);
       });
-      gearData.forEach(g => {
-        const meetsReq = s[g.reqSkill] >= g.reqLevel;
-        itemHTML.push(`
-          <img class="icon ${!meetsReq ? 'locked' : ''}"
-               src="${BASE_URL}${g.file}"
-               alt="${g.name}"
-               title="${g.name} (Req ${g.reqSkill} ${g.reqLevel})">
-        `);
-      });
-
-      const tr = document.createElement("tr");
-      if (isYou) tr.classList.add("highlight");
-      tr.innerHTML = `
-        <td>${p.username}</td>
-        <td class="role">${p.combatRole}</td>
-        <td>${p.supportRole || "None"}</td>
-        <td>${levelStr}</td>
-        <td class="item-list">${wepIcon}${itemHTML.join("")}</td>
-      `;
-      tbody.appendChild(tr);
-    });
-
-    table.appendChild(tbody);
-    container.appendChild(table);
-
-    // Side-by-side info boxes
-    const infoContainer = document.createElement("div");
-    infoContainer.className = "info-container";
-
-    // summary box
-    const summary = document.createElement("div");
-    summary.className = "info-box";
-    summary.innerHTML = `
-      <h3>Raid Summary</h3>
-      <p>Group Size: ${count}</p>
-      <p>Item Drops Each: ${itemCount}</p>
-      <p>Bosses: ${bosses}, Monsters: ${monsters}</p>
-      <p>Max Weapons (Bow/Hammer/Staff): ${itemCount}</p>
-    `;
-    infoContainer.appendChild(summary);
-
-    // Etiquette
-    const note = document.createElement("div");
-    note.className = "info-box";
-    note.innerHTML = `
-      <h3>General Etiquette & Tips</h3>
-      <ul>
-        <li>Archers get gloves first; Melee gets plate boots, etc.</li>
-        <li>Heavy Hammer users have priority on Outstanding/Godlike Gems.</li>
-        <li>Try to skip gem tiers if it helps the team overall.</li>
-        <li>2 players => 1 plundering, 1 fish+cook. More players => advanced distribution.</li>
-        <li>Cursed gear requires Magic ≥80; black leather requires Archery ≥40.</li>
-        <li>Click a previously used name to fill the next empty slot (avoiding duplicates).</li>
-      </ul>
-    `;
-    infoContainer.appendChild(note);
-
-    container.appendChild(infoContainer);
-
-    // Gem Priority section
-    const gemBox = document.createElement("div");
-    gemBox.className = "info-box";
-    gemBox.innerHTML = `<h3>Gemstone Priority</h3>`;
-    container.appendChild(gemBox);
-
-    // Build a table that shows each gem, columns = 1st, 2nd, etc
-    const sortedByCraft = [...players].sort((a,b) => b.skillLevels.Crafting - a.skillLevels.Crafting);
-    const maxSlots = sortedByCraft.length; // up to 6
-
-    const gemTable = document.createElement("table");
-    gemTable.className = "gem-priority-table";
-    let headerRow = `<tr><th>Gem</th>`;
-    for (let i = 1; i <= maxSlots; i++) {
-      // nth label (1st, 2nd, 3rd...) quick check
-      let suffix = "th";
-      if (i === 1) suffix = "st";
-      else if (i === 2) suffix = "nd";
-      else if (i === 3) suffix = "rd";
-      headerRow += `<th>${i}${suffix}</th>`;
-    }
-    headerRow += `</tr>`;
-    gemTable.innerHTML = `<thead>${headerRow}</thead>`;
-
-    const gemBody = document.createElement("tbody");
-    gemstoneData.forEach(g => {
-      const row = document.createElement("tr");
-      row.innerHTML = `
-        <td>
-          <img class="icon" src="${BASE_URL}${g.file}" alt="${g.name}"/>
-          ${g.name}
-        </td>
-      `;
-      sortedByCraft.forEach(pl => {
-        const user = pl.username;
-        const isYou = (user.toLowerCase() === yourName.toLowerCase());
-        const meetsReq = pl.skillLevels[g.reqSkill] >= g.reqLevel;
-        let displayUser = meetsReq ? user : "(locked)";
-        let styleCell = isYou ? `style="background: var(--highlight-bg);"` : "";
-        row.innerHTML += `<td ${styleCell}>${displayUser}</td>`;
-      });
-      gemBody.appendChild(row);
-    });
-    gemTable.appendChild(gemBody);
-    gemBox.appendChild(gemTable);
-  }
-
-  /************************************************************
-   * 9) Theme Toggle + Persistence
-   ************************************************************/
-  document.addEventListener("DOMContentLoaded", () => {
-    // Load localStorage settings
-    loadHistory();
-    generateOtherFields();
-
-    // 1) Check stored preference for dark mode
-    const storedDark = localStorage.getItem("darkMode");
-    const themeSwitch = document.getElementById("themeSwitch");
-    if (storedDark === "1") {
-      document.body.classList.add("dark-theme");
-      themeSwitch.checked = true;
+      gemTable.appendChild(gemBody);
+      gemBox.appendChild(gemTable);
     }
 
-    // 2) Listen for toggles
-    themeSwitch.addEventListener("change", () => {
-      if (themeSwitch.checked) {
+    /************************************************************
+     * SHARE LINK FEATURE
+     * We'll store { yourUsername, others: [...], otherCount }
+     * in a JSON, base64 it, put in #share=...
+     ************************************************************/
+    function shareLink() {
+      const yourU = sanitizeUsername(document.getElementById("yourUsername").value);
+      const cnt = parseInt(document.getElementById("otherCountSelect").value) || 0;
+      const others = [];
+      for (let i = 0; i < cnt; i++) {
+        const nm = sanitizeUsername(document.getElementById("other" + i).value);
+        others.push(nm);
+      }
+      // Build an object
+      const dataObj = {
+        you: yourU,
+        otherCount: cnt,
+        others
+      };
+      // Convert to base64
+      const str = JSON.stringify(dataObj);
+      const encoded = btoa(str);
+
+      // Build share URL with #share=encoded
+      const base = window.location.origin + window.location.pathname;
+      const finalURL = base + "#share=" + encoded;
+      prompt("Copy & share this link:", finalURL);
+    }
+
+    function loadShareDataFromHash() {
+      if (window.location.hash && window.location.hash.includes("share=")) {
+        const parts = window.location.hash.split("share=");
+        if (parts.length < 2) return;
+        const encoded = parts[1];
+        try {
+          const decoded = atob(encoded);
+          const data = JSON.parse(decoded);
+          if (data && data.you) {
+            document.getElementById("yourUsername").value = sanitizeUsername(data.you);
+            document.getElementById("otherCountSelect").value = data.otherCount || 0;
+            generateOtherFields(); // rebuild fields
+            data.others.forEach((nm, i) => {
+              if (document.getElementById("other"+ i)) {
+                document.getElementById("other"+ i).value = sanitizeUsername(nm);
+              }
+            });
+          }
+        } catch(e) {
+          console.warn("Invalid share data in URL:", e);
+        }
+      }
+    }
+
+    /************************************************************
+     * 9) Theme Toggle + DOMContentLoaded
+     ************************************************************/
+    document.addEventListener("DOMContentLoaded", () => {
+      // 1) Load localStorage
+      loadHistory();
+      generateOtherFields();
+
+      // 2) Possibly load share data from #hash
+      loadShareDataFromHash();
+
+      // 3) Theme
+      const storedDark = localStorage.getItem("darkMode");
+      const themeSwitch = document.getElementById("themeSwitch");
+      if (storedDark === "1") {
         document.body.classList.add("dark-theme");
-        localStorage.setItem("darkMode", "1");
-      } else {
-        document.body.classList.remove("dark-theme");
-        localStorage.setItem("darkMode", "0");
+        themeSwitch.checked = true;
       }
+      themeSwitch.addEventListener("change", () => {
+        if (themeSwitch.checked) {
+          document.body.classList.add("dark-theme");
+          localStorage.setItem("darkMode", "1");
+        } else {
+          document.body.classList.remove("dark-theme");
+          localStorage.setItem("darkMode", "0");
+        }
+      });
+
+      // 4) Sidebar clear
+      document.getElementById("clearHistoryBtn").addEventListener("click", clearAllHistory);
+
+      // 5) Clear username
+      document.getElementById("clearUsernameBtn").addEventListener("click", () => {
+        document.getElementById("yourUsername").value = "";
+      });
+
+      // 6) Clear ALL current inputs
+      document.getElementById("clearAllInputsBtn").addEventListener("click", () => {
+        document.getElementById("yourUsername").value = "";
+        const cnt = parseInt(document.getElementById("otherCountSelect").value) || 0;
+        for (let i = 0; i < cnt; i++){
+          document.getElementById("other"+i).value = "";
+        }
+      });
+
+      // 7) When # of others changes
+      document.getElementById("otherCountSelect").addEventListener("change", generateOtherFields);
+
+      // 8) Fetch
+      document.getElementById("fetchBtn").addEventListener("click", fetchAll);
+
+      // 9) Share
+      document.getElementById("shareBtn").addEventListener("click", shareLink);
     });
-  });
   </script>
 </body>
 </html>
